@@ -1,0 +1,25 @@
+camera:
+  id: usb-webcam-1
+  rtsp_url: rtsp://localhost:8554/webcam
+  capture_fps: 8
+
+eventing:
+  sample_every_n_frames: 8
+  min_confidence: 0.45
+  cooldown_seconds: 8
+
+models:
+  device: cuda
+  detector:
+    backend: yolo
+    model: yolo11n.pt
+  embedding:
+    backend: clip
+    model: sentence-transformers/clip-ViT-B-32
+  vlm:
+    backend: template
+    model: Qwen/Qwen2.5-VL-3B-Instruct
+
+storage:
+  database_path: data/events.db
+  media_dir: data/media

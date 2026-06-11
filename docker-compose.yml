@@ -1,0 +1,19 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+    network_mode: host
+
+  api:
+    build:
+      context: .
+      args:
+        INSTALL_EXTRAS: ""
+    restart: unless-stopped
+    network_mode: host
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - mediamtx

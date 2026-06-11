@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vision Pipeline</title>
+    <link rel="stylesheet" href="/static/styles.css?v=search-fix" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <h1>Vision Pipeline</h1>
+          <p id="statusLine">Connecting...</p>
+        </div>
+        <div class="actions">
+          <button id="startButton" type="button" title="Start pipeline">▶</button>
+          <button id="stopButton" type="button" title="Stop pipeline">■</button>
+        </div>
+      </header>
+
+      <section class="searchbar" aria-label="Semantic event search">
+        <input id="queryInput" type="search" placeholder="Search visual memory" autocomplete="off" />
+        <select id="embeddingType" title="Embedding search mode">
+          <option value="any">Any</option>
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="legacy">Legacy</option>
+        </select>
+        <button id="searchButton" type="button">Search</button>
+        <button id="clearButton" type="button">Clear</button>
+      </section>
+
+      <section class="camera-sample" aria-label="Latest camera sample">
+        <div class="sample-heading">
+          <h2>Latest Sample</h2>
+          <span id="sampleMeta">No frame</span>
+        </div>
+        <div class="frame-viewer live-viewer">
+          <img id="sampleImage" alt="Latest camera sample" />
+          <svg id="sampleOverlay" class="box-overlay" aria-hidden="true"></svg>
+        </div>
+      </section>
+
+      <section class="layout">
+        <aside class="sidebar">
+          <div class="metric"><span>Events</span><strong id="eventCount">0</strong></div>
+          <div class="metric"><span>Frames</span><strong id="frameCount">0</strong></div>
+          <div class="metric"><span>Camera</span><strong id="cameraId">-</strong></div>
+          <div class="metric"><span>RTSP</span><strong id="rtspUrl">-</strong></div>
+          <div class="metric cleanup-control">
+            <span>Cleanup</span>
+            <select id="deleteRange" title="Event cleanup range">
+              <option value="7">Older than 7d</option>
+              <option value="30">Older than 30d</option>
+              <option value="90">Older than 90d</option>
+              <option value="all">All events</option>
+            </select>
+            <button id="deleteRangeButton" type="button">Delete</button>
+          </div>
+        </aside>
+
+        <section class="events" id="events"></section>
+      </section>
+    </main>
+
+    <template id="eventTemplate">
+      <article class="event-card">
+        <div class="frame-viewer event-viewer">
+          <img class="event-image" alt="Detected event frame" />
+          <svg class="box-overlay" aria-hidden="true"></svg>
+        </div>
+        <div class="event-body">
+          <div class="event-heading">
+            <h2></h2>
+            <div class="event-actions">
+              <span class="confidence"></span>
+              <button class="delete-event-button" type="button" title="Delete event">×</button>
+            </div>
+          </div>
+          <p class="description"></p>
+          <div class="meta"></div>
+          <div class="chips"></div>
+        </div>
+      </article>
+    </template>
+
+    <script src="/static/app.js?v=search-fix" type="module"></script>
+  </body>
+</html>

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vision-pipeline"
+version = "0.1.0"
+description = "Open-source edge AI vision pipeline for RTSP cameras, event memory, embeddings, VLM descriptions, and search."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Vision Pipeline Contributors" }]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "pydantic-settings>=2.4",
+  "numpy>=1.26",
+  "pillow>=10.3",
+]
+
+[project.optional-dependencies]
+models = [
+  "opencv-python-headless>=4.10",
+  "ultralytics>=8.3",
+  "sentence-transformers>=3.0",
+  "torch>=2.3",
+  "torchvision>=0.18",
+  "transformers>=4.45",
+  "accelerate>=0.33",
+]
+dev = [
+  "pytest>=8.2",
+  "ruff>=0.5",
+]
+
+[project.scripts]
+vision-pipeline = "vision_pipeline.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+vision_pipeline = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
