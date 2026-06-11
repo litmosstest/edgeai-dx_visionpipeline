@@ -137,6 +137,36 @@ def test_vector_search_can_target_video_embeddings(tmp_path: Path) -> None:
     assert video_results[0]["id"] == second.id
 
 
+def test_typed_vector_search_keeps_embedding_spaces_separate(tmp_path: Path) -> None:
+    store = EventStore(tmp_path / "events.db")
+    image_match = VisualEvent.create(
+        camera_id="test-camera",
+        label_summary="image-match",
+        confidence=0.9,
+        description="Image match.",
+        image_path=tmp_path / "image.jpg",
+        detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
+        image_embedding=[1.0, 0.0],
+        video_embedding=[1.0, 0.0],
+    )
+    video_match = VisualEvent.create(
+        camera_id="test-camera",
+        label_summary="video-match",
+        confidence=0.8,
+        description="Video match.",
+        image_path=tmp_path / "video.jpg",
+        detections=[Detection("person", 0.8, (0.0, 0.0, 1.0, 1.0))],
+        image_embedding=[0.0, 1.0],
+        video_embedding=[0.0, 1.0],
+    )
+    store.add_event(image_match)
+    store.add_event(video_match)
+
+    result = store.search_by_typed_vectors_with_stats({"video": [0.0, 1.0]})
+
+    assert result["events"][0]["id"] == video_match.id
+
+
 def test_vector_search_skips_incompatible_dimensions(tmp_path: Path) -> None:
     store = EventStore(tmp_path / "events.db")
     incompatible = VisualEvent.create(
@@ -196,7 +226,7 @@ def test_vector_search_boosts_matching_labels(tmp_path: Path) -> None:
     assert result["events"][0]["text_score"] > 0
 
 
-def test_update_event_embeddings_replaces_stored_vectors(tmp_path: Path) -> None:
+def test_update_event_embeddings_preserves_video_vector_by_default(tmp_path: Path) -> None:
     store = EventStore(tmp_path / "events.db")
     event = VisualEvent.create(
         camera_id="test-camera",
@@ -205,7 +235,8 @@ def test_update_event_embeddings_replaces_stored_vectors(tmp_path: Path) -> None
         description="Person detected.",
         image_path=tmp_path / "event.jpg",
         detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
-        embedding=[1.0, 0.0],
+        image_embedding=[1.0, 0.0],
+        video_embedding=[0.0, 1.0],
     )
     store.add_event(event)
 
@@ -214,7 +245,32 @@ def test_update_event_embeddings_replaces_stored_vectors(tmp_path: Path) -> None
     embeddings = store.get_event_embeddings(event.id, include_values=True)
     assert embeddings is not None
     assert embeddings["image"]["dimensions"] == 3
-    assert embeddings["vectors"]["video"] == [0.0, 1.0, 0.0]
+    assert embeddings["vectors"]["video"] == [0.0, 1.0]
+
+
+def test_update_event_embeddings_replaces_video_when_supplied(tmp_path: Path) -> None:
+    store = EventStore(tmp_path / "events.db")
+    event = VisualEvent.create(
+        camera_id="test-camera",
+        label_summary="person",
+        confidence=0.9,
+        description="Person detected.",
+        image_path=tmp_path / "event.jpg",
+        detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
+        image_embedding=[1.0, 0.0],
+        video_embedding=[0.0, 1.0],
+    )
+    store.add_event(event)
+
+    store.update_event_embeddings(
+        event.id,
+        image_embedding=[0.0, 1.0, 0.0],
+        video_embedding=[0.5, 0.5, 0.5],
+    )
+
+    embeddings = store.get_event_embeddings(event.id, include_values=True)
+    assert embeddings is not None
+    assert embeddings["vectors"]["video"] == [0.5, 0.5, 0.5]
 
 
 def test_delete_event_removes_row_and_media(tmp_path: Path) -> None:

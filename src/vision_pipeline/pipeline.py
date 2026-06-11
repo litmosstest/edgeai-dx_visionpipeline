@@ -214,6 +214,8 @@ class PipelineController:
                 self.settings.embedding_backend,
                 self.settings.embedding_model,
                 self.settings.device,
+                self.settings.video_embedding_backend,
+                self.settings.video_embedding_model,
             )
             describer = build_describer(
                 self.settings.vlm_backend,

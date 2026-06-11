@@ -16,6 +16,10 @@ models:
   embedding:
     backend: clip
     model: sentence-transformers/clip-ViT-B-32
+  video_embedding:
+    backend: frame_average
+    model: microsoft/xclip-base-patch32
+    frames: 8
   vlm:
     backend: template
     model: Qwen/Qwen2.5-VL-3B-Instruct

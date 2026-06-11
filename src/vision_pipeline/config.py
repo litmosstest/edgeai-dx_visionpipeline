@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     detector_model: str = "yolo11n.pt"
     embedding_backend: str = "clip"
     embedding_model: str = "sentence-transformers/clip-ViT-B-32"
+    video_embedding_backend: str = "frame_average"
+    video_embedding_model: str = "microsoft/xclip-base-patch32"
     video_embedding_frames: int = Field(default=8, ge=1, le=64)
     vlm_backend: str = "template"
     vlm_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"

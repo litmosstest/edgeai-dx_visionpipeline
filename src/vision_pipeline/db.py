@@ -163,7 +163,22 @@ class EventStore:
         embedding_type: str = "any",
         query_text: str | None = None,
     ) -> dict[str, Any]:
-        if not query_vector:
+        query_vectors = single_query_vector_map(query_vector, embedding_type)
+        return self.search_by_typed_vectors_with_stats(
+            query_vectors,
+            limit=limit,
+            query_text=query_text,
+        )
+
+    def search_by_typed_vectors_with_stats(
+        self,
+        query_vectors: dict[str, list[float]],
+        limit: int = 20,
+        query_text: str | None = None,
+    ) -> dict[str, Any]:
+        query_vectors = {key: vector for key, vector in query_vectors.items() if vector}
+        query_dimensions = sorted({len(vector) for vector in query_vectors.values()})
+        if not query_vectors:
             return {
                 "events": [],
                 "query_dimensions": 0,
@@ -177,12 +192,17 @@ class EventStore:
         scored: list[tuple[float, sqlite3.Row, float, float]] = []
         skipped_vectors = 0
         for row in rows:
-            vectors = event_vectors(row, embedding_type)
-            compatible_vectors = [vector for vector in vectors if len(vector) == len(query_vector)]
-            skipped_vectors += len(vectors) - len(compatible_vectors)
-            if not compatible_vectors:
+            vector_pairs = typed_event_vectors(row, query_vectors.keys())
+            compatible_scores = []
+            for vector_type, vector in vector_pairs:
+                query_vector = query_vectors[vector_type]
+                if len(vector) != len(query_vector):
+                    skipped_vectors += 1
+                    continue
+                compatible_scores.append(cosine_similarity(query_vector, vector))
+            if not compatible_scores:
                 continue
-            vector_score = max(cosine_similarity(query_vector, vector) for vector in compatible_vectors)
+            vector_score = max(compatible_scores)
             text_score = text_relevance(query_text or "", row)
             score = vector_score + text_score
             scored.append((score, row, vector_score, text_score))
@@ -198,7 +218,9 @@ class EventStore:
                 )
                 for score, row, vector_score, text_score in scored[:limit]
             ],
-            "query_dimensions": len(query_vector),
+            "query_dimensions": query_dimensions[0]
+            if len(query_dimensions) == 1
+            else max(query_dimensions),
             "compatible_events": len(scored),
             "skipped_vectors": skipped_vectors,
         }
@@ -287,21 +309,34 @@ class EventStore:
         image_embedding: list[float],
         video_embedding: list[float] | None = None,
     ) -> None:
-        resolved_video_embedding = video_embedding if video_embedding is not None else image_embedding
         with self.connect() as connection:
-            connection.execute(
-                """
-                UPDATE events
-                SET embedding_json = ?, image_embedding_json = ?, video_embedding_json = ?
-                WHERE id = ?
-                """,
-                (
-                    json.dumps(image_embedding),
-                    json.dumps(image_embedding),
-                    json.dumps(resolved_video_embedding),
-                    event_id,
-                ),
-            )
+            if video_embedding is None:
+                connection.execute(
+                    """
+                    UPDATE events
+                    SET embedding_json = ?, image_embedding_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(image_embedding),
+                        json.dumps(image_embedding),
+                        event_id,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    UPDATE events
+                    SET embedding_json = ?, image_embedding_json = ?, video_embedding_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        json.dumps(image_embedding),
+                        json.dumps(image_embedding),
+                        json.dumps(video_embedding),
+                        event_id,
+                    ),
+                )
 
     def iter_embeddings(self) -> Iterable[list[float]]:
         with self.connect() as connection:
@@ -357,6 +392,38 @@ def max_embedding_score(
     if not vectors:
         return 0.0
     return max(cosine_similarity(query_vector, vector) for vector in vectors)
+
+
+def single_query_vector_map(
+    query_vector: list[float], embedding_type: str = "any"
+) -> dict[str, list[float]]:
+    normalized = embedding_type.lower()
+    if normalized == "image":
+        return {"image": query_vector}
+    if normalized == "video":
+        return {"video": query_vector}
+    if normalized == "legacy":
+        return {"legacy": query_vector}
+    return {"image": query_vector, "video": query_vector}
+
+
+def typed_event_vectors(
+    row: sqlite3.Row,
+    embedding_types: Iterable[str],
+) -> list[tuple[str, list[float]]]:
+    legacy_vector = json.loads(row["embedding_json"])
+    image_vector = json.loads(row["image_embedding_json"] or row["embedding_json"])
+    video_vector = json.loads(row["video_embedding_json"] or row["embedding_json"])
+    vectors = {
+        "image": image_vector,
+        "video": video_vector,
+        "legacy": legacy_vector,
+    }
+    return [
+        (embedding_type, vectors[embedding_type])
+        for embedding_type in embedding_types
+        if embedding_type in vectors
+    ]
 
 
 def event_vectors(row: sqlite3.Row, embedding_type: str = "any") -> list[list[float]]:

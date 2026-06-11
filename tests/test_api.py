@@ -7,6 +7,26 @@ from vision_pipeline.config import Settings
 from vision_pipeline.models import Detection, VisualEvent
 
 
+class FakeSearchEmbedder:
+    def __init__(self) -> None:
+        self.text_queries: list[str] = []
+        self.video_text_queries: list[str] = []
+
+    def embed_image(self, image) -> list[float]:
+        return [1.0, 0.0]
+
+    def embed_video(self, frames) -> list[float]:
+        return [0.0, 1.0]
+
+    def embed_text(self, text: str) -> list[float]:
+        self.text_queries.append(text)
+        return [1.0, 0.0]
+
+    def embed_video_text(self, text: str) -> list[float]:
+        self.video_text_queries.append(text)
+        return [0.0, 1.0]
+
+
 def test_search_reuses_cached_embedder(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "events.db",
@@ -58,6 +78,57 @@ def test_search_reports_incompatible_embeddings(tmp_path: Path) -> None:
         assert payload["events"] == []
         assert payload["query_dimensions"] == 384
         assert payload["skipped_vectors"] == 2
+
+
+def test_video_search_uses_video_text_query(tmp_path: Path, monkeypatch) -> None:
+    fake_embedder = FakeSearchEmbedder()
+    monkeypatch.setattr(
+        "vision_pipeline.api.build_embedder",
+        lambda *args: fake_embedder,
+    )
+    settings = Settings(
+        database_path=tmp_path / "events.db",
+        media_dir=tmp_path / "media",
+        embedding_backend="hash",
+        embedding_model="unused",
+        device="cpu",
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        image_match = VisualEvent.create(
+            camera_id="test-camera",
+            label_summary="image-match",
+            confidence=0.9,
+            description="Image match.",
+            image_path=tmp_path / "image.jpg",
+            detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
+            image_embedding=[1.0, 0.0],
+            video_embedding=[1.0, 0.0],
+        )
+        video_match = VisualEvent.create(
+            camera_id="test-camera",
+            label_summary="video-match",
+            confidence=0.9,
+            description="Video match.",
+            image_path=tmp_path / "video.jpg",
+            detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
+            image_embedding=[0.0, 1.0],
+            video_embedding=[0.0, 1.0],
+        )
+        app.state.pipeline.store.add_event(image_match)
+        app.state.pipeline.store.add_event(video_match)
+
+        response = client.post(
+            "/api/search",
+            json={"query": "person entering", "limit": 3, "embedding_type": "video"},
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["events"][0]["id"] == video_match.id
+        assert fake_embedder.text_queries == []
+        assert fake_embedder.video_text_queries == ["person entering"]
 
 
 def test_delete_event_endpoint(tmp_path: Path) -> None:

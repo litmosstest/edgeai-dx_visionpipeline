@@ -10,7 +10,7 @@ from PIL import Image
 
 from vision_pipeline.config import load_settings
 from vision_pipeline.db import EventStore
-from vision_pipeline.embeddings import build_embedder
+from vision_pipeline.embeddings import build_image_embedder
 from vision_pipeline.vlm import build_describer
 
 
@@ -77,7 +77,7 @@ def reembed_events(limit: int | None = None, dry_run: bool = False) -> None:
         print(f"Would re-embed {len(rows)} events using {settings.embedding_model}.")
         return
 
-    embedder = build_embedder(
+    embedder = build_image_embedder(
         settings.embedding_backend,
         settings.embedding_model,
         settings.device,

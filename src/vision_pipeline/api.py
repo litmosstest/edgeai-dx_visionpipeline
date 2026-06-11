@@ -46,6 +46,8 @@ class PipelineAppState:
                         self.settings.embedding_backend,
                         self.settings.embedding_model,
                         self.settings.device,
+                        self.settings.video_embedding_backend,
+                        self.settings.video_embedding_model,
                     )
         return self._search_embedder
 
@@ -126,11 +128,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def search(request: SearchRequest) -> dict[str, Any]:
         state = get_state(app)
         embedder = state.search_embedder()
-        query_vector = embedder.embed_text(request.query)
-        return state.store.search_by_vector_with_stats(
-            query_vector,
+        query_vectors = search_query_vectors(embedder, request.query, request.embedding_type)
+        return state.store.search_by_typed_vectors_with_stats(
+            query_vectors,
             limit=request.limit,
-            embedding_type=request.embedding_type,
             query_text=request.query,
         )
 
@@ -154,6 +155,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 def get_state(app: FastAPI) -> PipelineAppState:
     return app.state.pipeline
+
+
+def search_query_vectors(
+    embedder: Embedder,
+    query: str,
+    embedding_type: str,
+) -> dict[str, list[float]]:
+    normalized = embedding_type.lower()
+    if normalized == "image":
+        return {"image": embedder.embed_text(query)}
+    if normalized == "video":
+        return {"video": embedder.embed_video_text(query)}
+    if normalized == "legacy":
+        return {"legacy": embedder.embed_text(query)}
+    return {
+        "image": embedder.embed_text(query),
+        "video": embedder.embed_video_text(query),
+    }
 
 
 app = create_app()

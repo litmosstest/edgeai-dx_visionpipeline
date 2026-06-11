@@ -12,7 +12,7 @@ USB webcam or test pattern
     -> Object detection: Ultralytics YOLO, yolo11n.pt by default
     -> Event filter: target labels, confidence >= 0.45, 8 second cooldown
     -> CLIP image embedding: sentence-transformers/clip-ViT-B-32
-    -> Video embedding: average of the latest 8 CLIP frame embeddings
+    -> Video embedding: frame_average by default, or X-CLIP microsoft/xclip-base-patch32
     -> VLM description: template backend by default, Qwen/Qwen2.5-VL-3B-Instruct for transformers
     -> SQLite event memory + saved media frames
     -> FastAPI dashboard, event search, and review UI
@@ -25,7 +25,7 @@ Default video publication is `/dev/video0` at `1280x720` and `30 FPS`; override 
 - USB webcam to RTSP with MediaMTX and FFmpeg.
 - Object detection with a lazy-loaded Ultralytics YOLO adapter.
 - Image and text embeddings with a lazy-loaded CLIP-compatible Sentence Transformers adapter.
-- Video event embeddings by averaging a short rolling window of frame embeddings.
+- Video event embeddings from a rolling frame window, with a CLIP frame-average fallback or a dedicated X-CLIP video-text model.
 - SQLite event memory with cosine vector search in Python for the MVP.
 - VLM descriptions through a lightweight template backend or a Transformers image-to-text adapter for local VLMs.
 - FastAPI API and built-in dashboard at `http://localhost:8081` by default.
@@ -152,6 +152,15 @@ VISION_EMBEDDING_MODEL=sentence-transformers/clip-ViT-B-32
 VISION_VIDEO_EMBEDDING_FRAMES=8
 ```
 
+For temporal video recall, switch the video embedding backend to X-CLIP:
+
+```bash
+VISION_VIDEO_EMBEDDING_BACKEND=xclip
+VISION_VIDEO_EMBEDDING_MODEL=microsoft/xclip-base-patch32
+```
+
+When X-CLIP is enabled, event video embeddings are generated from the ordered rolling frame window, and video searches use X-CLIP text embeddings instead of CLIP text embeddings. Existing rows that only have saved key frames cannot be backfilled into true temporal video embeddings unless event clips or frame windows were stored at capture time.
+
 `demo-target` and `watch-zone` are generated only by the demo detector; they are not real object classes.
 
 ## RTSP Webcam Input
@@ -218,7 +227,7 @@ VISION_PORT=8082 vision-pipeline api
 | --- | --- | --- | --- |
 | Object detection | YOLO11n | YOLO11s, RT-DETR, RF-DETR, TensorRT-exported YOLO | Track latency, mAP, VRAM, and false positives per scene. |
 | Image embeddings | CLIP ViT-B/32 | MobileCLIP, SigLIP, OpenCLIP | Stores a key-frame embedding for each event. |
-| Video embeddings | Averaged CLIP frame window | X-CLIP, VideoCLIP, LanguageBind, SigLIP frame pooling | Stores a temporal embedding from the latest sampled event window for motion/context recall. |
+| Video embeddings | Frame-average CLIP window or X-CLIP | X-CLIP, VideoCLIP, LanguageBind, SigLIP frame pooling | Dedicated video backends store a temporal embedding from the latest sampled event window and use their own text-query embedding space for search. |
 | Vector search | SQLite + cosine scan | sqlite-vec, sqlite-vss, LanceDB | SQLite scan is simple for thousands of events; switch once event counts grow. |
 | VLM descriptions | Template backend | Qwen2.5-VL, Qwen3-VL when available, InternVL | Run asynchronously for lower capture latency. |
 
@@ -233,7 +242,7 @@ VISION_PORT=8082 vision-pipeline api
 - `POST /api/search` with `{ "query": "person at the door", "limit": 20 }` searches both image and video embeddings.
 - Add `"embedding_type": "image"` or `"embedding_type": "video"` to search one embedding space explicitly.
 - Event cards show embedding chips such as `image 384d` and `video 384d`; those are the stored vector dimensions.
-- If search returns no compatible events after changing embedding backends/models, rebuild saved event vectors with `vision-pipeline reembed-events`.
+- If image search returns no compatible events after changing image embedding backends/models, rebuild saved key-frame vectors with `vision-pipeline reembed-events`. This command preserves existing video vectors because saved rows do not contain the ordered frame windows needed to rebuild true temporal video embeddings.
 - To regenerate saved event descriptions after changing VLM backends/models, run `vision-pipeline describe-events`.
 - `DELETE /api/events/{event_id}` deletes one event and its saved event image.
 - `POST /api/events/delete` with `{ "older_than_days": 30 }` deletes events older than the chosen retention window.
@@ -242,7 +251,7 @@ VISION_PORT=8082 vision-pipeline api
 ## Next Engineering Steps
 
 - Add sqlite-vec or sqlite-vss as the vector index while keeping SQLite as the metadata store.
-- Replace averaged frame embeddings with a dedicated video embedding model once latency and VRAM budgets are measured.
+- Store short event clips or frame windows so dedicated video embeddings can be regenerated after model changes.
 - Split VLM description generation into a worker queue so detection stays low-latency.
 - Add event windows with pre-roll/post-roll clips, not just key frames.
 - Export YOLO to TensorRT on DGX Spark and record latency, accuracy, and VRAM in `configs/`.
