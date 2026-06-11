@@ -2,6 +2,24 @@
 
 Open-source edge AI vision pipeline for an NVIDIA DGX Spark with a USB webcam. The starter turns the webcam into an RTSP source, samples the stream for object-detection events, stores event frames and metadata, embeds events for semantic recall, and exposes a web dashboard for search and review.
 
+## AI Pipeline At A Glance
+
+```text
+USB webcam or test pattern
+  1280x720 at 30 FPS default publisher, RTSP over TCP
+    -> MediaMTX RTSP stream: rtsp://localhost:8554/webcam
+    -> Python capture loop: 8 FPS target, sample every 8 frames
+    -> Object detection: Ultralytics YOLO, yolo11n.pt by default
+    -> Event filter: target labels, confidence >= 0.45, 8 second cooldown
+    -> CLIP image embedding: sentence-transformers/clip-ViT-B-32
+    -> Video embedding: average of the latest 8 CLIP frame embeddings
+    -> VLM description: template backend by default, Qwen/Qwen2.5-VL-3B-Instruct for transformers
+    -> SQLite event memory + saved media frames
+    -> FastAPI dashboard, event search, and review UI
+```
+
+Default video publication is `/dev/video0` at `1280x720` and `30 FPS`; override with `DEVICE`, `SIZE`, and `FPS` when running `./scripts/publish_webcam_rtsp.sh`. The full model path defaults are also captured in `.env.example` and `configs/pipeline.yaml`; lightweight demos can swap in `noop`, `demo`, `hash`, and `template` backends without downloading GPU model weights.
+
 ## What It Builds
 
 - USB webcam to RTSP with MediaMTX and FFmpeg.
