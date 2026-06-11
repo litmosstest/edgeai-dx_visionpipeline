@@ -1,10 +1,25 @@
-.PHONY: install install-models api mediamtx publish test lint
+.PHONY: install install-models up down restart status logs api mediamtx publish test lint
 
 install:
 	python -m pip install -e .
 
 install-models:
 	python -m pip install -e '.[models,dev]'
+
+up:
+	bash scripts/stack.sh start
+
+down:
+	bash scripts/stack.sh stop
+
+restart:
+	bash scripts/stack.sh restart
+
+status:
+	bash scripts/stack.sh status
+
+logs:
+	bash scripts/stack.sh logs
 
 api:
 	vision-pipeline api

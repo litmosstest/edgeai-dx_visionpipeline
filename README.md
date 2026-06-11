@@ -105,15 +105,29 @@ cp .env.example .env
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[models,dev]'
-docker compose up -d mediamtx
-./scripts/publish_webcam_rtsp.sh
-vision-pipeline api
+make up
 ```
 
 Open `http://localhost:8081`, then press the start button in the dashboard or call:
 
 ```bash
 curl -X POST http://localhost:8081/api/pipeline/start
+```
+
+The stack helper starts MediaMTX, the FFmpeg webcam publisher, and the API in the background. Use these commands to manage it:
+
+```bash
+make status
+make logs
+make down
+```
+
+To run each piece manually instead, use:
+
+```bash
+docker compose up -d mediamtx
+./scripts/publish_webcam_rtsp.sh
+vision-pipeline api
 ```
 
 For a lightweight UI/API demo without GPU model dependencies, set these in `.env`:
@@ -220,6 +234,22 @@ If the API prints that port `8081` is already in use, find the process or run on
 ss -ltnp 'sport = :8081'
 VISION_PORT=8082 vision-pipeline api
 ```
+
+## Model Runtime And Acceleration
+
+All AI model backends run inside the Python `vision-pipeline api` process. Models are loaded lazily when the pipeline is started through the dashboard or `POST /api/pipeline/start`; MediaMTX and FFmpeg do not run AI inference. `VISION_DEVICE` controls the normal target device for PyTorch-backed model stages, with `cuda` as the default in `.env.example` and `configs/pipeline.yaml`.
+
+| Stage | Default backend / model | Runtime stack | Device / acceleration | Notes |
+| --- | --- | --- | --- | --- |
+| Object detection | `yolo` / `yolo11n.pt` | Ultralytics YOLO on PyTorch | GPU when `VISION_DEVICE=cuda`; CPU if set to `cpu` | Uses the `.pt` model directly. Not llama.cpp, ONNX, or TensorRT by default. |
+| Image and text embeddings | `clip` / `sentence-transformers/clip-ViT-B-32` | SentenceTransformers on PyTorch | GPU when `VISION_DEVICE=cuda`; CPU if set to `cpu` | Produces the image embeddings stored with events and text embeddings used for search. |
+| Video embeddings | `frame_average` / CLIP frame vectors | SentenceTransformers plus NumPy averaging | CLIP frame embeddings follow `VISION_DEVICE`; vector averaging is CPU/NumPy | `VISION_VIDEO_EMBEDDING_MODEL` names X-CLIP, but no separate video model is loaded unless the backend is changed to `xclip`. |
+| Optional temporal video embeddings | `xclip` / `microsoft/xclip-base-patch32` | Hugging Face Transformers `XCLIPModel` on PyTorch | GPU when `VISION_DEVICE=cuda`; CPU if set to `cpu` | Enabled by setting `VISION_VIDEO_EMBEDDING_BACKEND=xclip`. Generates video and video-text embeddings in X-CLIP space. |
+| VLM descriptions | `template` / no model | Python template string generation | CPU only | Default lightweight path; no learned VLM is loaded. |
+| Optional VLM descriptions | `transformers` / `Qwen/Qwen2.5-VL-3B-Instruct` | Hugging Face `transformers.pipeline("image-text-to-text")` with Accelerate-style `device_map="auto"` on CUDA | GPU auto-placement when `VISION_DEVICE=cuda`; CPU otherwise | Not llama.cpp or GGUF. Uses `torch_dtype="auto"` and may require significant VRAM. |
+| Demo / no-op paths | `demo`, `noop`, `hash` | Python, NumPy, and `hashlib` | CPU only | Useful for UI/API testing without downloading model weights. |
+| RTSP publishing | FFmpeg `libx264` | FFmpeg / x264 | CPU encode by default | The publisher command uses `-c:v libx264`; it does not use NVENC unless the script is changed. |
+| RTSP serving | MediaMTX | MediaMTX container | No AI acceleration | Relays the stream; it does not load or execute models. |
 
 ## Model Curation Targets
 
