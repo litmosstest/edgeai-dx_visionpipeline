@@ -126,6 +126,22 @@ VISION_VLM_BACKEND=template
 
 Use `VISION_DETECTOR_BACKEND=demo` with `./scripts/publish_test_rtsp.sh` to see moving sample boxes without downloading model weights.
 
+For real VLM event descriptions, install the model extras and switch the VLM backend:
+
+```bash
+pip install -e '.[models]'
+VISION_VLM_BACKEND=transformers
+VISION_VLM_MODEL=Qwen/Qwen2.5-VL-3B-Instruct
+```
+
+New events are described as they are stored. To fill in descriptions for events that already exist in SQLite, run:
+
+```bash
+vision-pipeline describe-events --limit 20
+```
+
+Add `--dry-run` to preview how many rows would be updated. The Transformers VLM runs locally and may take time to load the first time.
+
 To store only people events from YOLO, set:
 
 ```bash
@@ -218,6 +234,7 @@ VISION_PORT=8082 vision-pipeline api
 - Add `"embedding_type": "image"` or `"embedding_type": "video"` to search one embedding space explicitly.
 - Event cards show embedding chips such as `image 384d` and `video 384d`; those are the stored vector dimensions.
 - If search returns no compatible events after changing embedding backends/models, rebuild saved event vectors with `vision-pipeline reembed-events`.
+- To regenerate saved event descriptions after changing VLM backends/models, run `vision-pipeline describe-events`.
 - `DELETE /api/events/{event_id}` deletes one event and its saved event image.
 - `POST /api/events/delete` with `{ "older_than_days": 30 }` deletes events older than the chosen retention window.
 - `POST /api/events/delete` with `{ "all": true }` clears event history. The live `*-latest.jpg` camera sample is not an event and is left in place.

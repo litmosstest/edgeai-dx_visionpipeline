@@ -15,11 +15,14 @@ class EventDescriber(Protocol):
 
 class TemplateDescriber:
     def describe(self, image: Image.Image, detections: list[Detection]) -> str:
-        del image
         if not detections:
-            return "No configured objects were detected in this sampled frame."
+            return f"Camera frame {image.width}x{image.height}: no configured objects were detected."
         labels = summarize_labels(detections)
-        return f"Detected {labels} in the camera view."
+        top_confidence = max(detection.confidence for detection in detections)
+        return (
+            f"Camera frame {image.width}x{image.height}: detected {labels}; "
+            f"highest detector confidence {top_confidence:.0%}."
+        )
 
 
 @dataclass
@@ -43,10 +46,7 @@ class TransformersVlmDescriber:
 
     def describe(self, image: Image.Image, detections: list[Detection]) -> str:
         labels = summarize_labels(detections) if detections else "the scene"
-        prompt = (
-            "Write a concise security-camera event description. "
-            f"Known detector outputs: {labels}. Mention only visible evidence."
-        )
+        prompt = build_prompt(image, detections, labels)
         result = self.pipeline(
             [
                 {
@@ -68,6 +68,30 @@ def summarize_labels(detections: list[Detection]) -> str:
         counts[detection.label] = counts.get(detection.label, 0) + 1
     parts = [f"{count} {label}" if count > 1 else label for label, count in sorted(counts.items())]
     return ", ".join(parts)
+
+
+def summarize_detections(detections: list[Detection]) -> str:
+    if not detections:
+        return "none"
+    parts = []
+    for detection in detections:
+        x1, y1, x2, y2 = detection.bbox_xyxy
+        parts.append(
+            f"{detection.label} {detection.confidence:.0%} "
+            f"bbox=({x1:.0f},{y1:.0f},{x2:.0f},{y2:.0f})"
+        )
+    return "; ".join(parts)
+
+
+def build_prompt(image: Image.Image, detections: list[Detection], labels: str) -> str:
+    return (
+        "Write one concise security-camera event description for the image. "
+        "Use present tense. Mention only visible evidence and avoid inventing identities, "
+        "intent, or actions that are not visually clear. "
+        f"Image size: {image.width}x{image.height}. "
+        f"Detector summary: {labels}. "
+        f"Detector details: {summarize_detections(detections)}."
+    )
 
 
 def build_describer(backend: str, model_name: str, device: str) -> EventDescriber:

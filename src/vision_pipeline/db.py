@@ -248,6 +248,39 @@ class EventStore:
             rows = connection.execute(query, params).fetchall()
         return [{"id": row["id"], "image_path": Path(row["image_path"])} for row in rows]
 
+    def list_event_description_inputs(self, limit: int | None = None) -> list[dict[str, Any]]:
+        query = """
+            SELECT id, description, image_path, detections_json
+            FROM events
+            ORDER BY timestamp DESC
+        """
+        params: tuple[int, ...] = ()
+        if limit is not None:
+            query = f"{query} LIMIT ?"
+            params = (limit,)
+        with self.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [
+            {
+                "id": row["id"],
+                "description": row["description"],
+                "image_path": Path(row["image_path"]),
+                "detections": detections_from_json(row["detections_json"]),
+            }
+            for row in rows
+        ]
+
+    def update_event_description(self, event_id: str, description: str) -> None:
+        with self.connect() as connection:
+            connection.execute(
+                """
+                UPDATE events
+                SET description = ?
+                WHERE id = ?
+                """,
+                (description, event_id),
+            )
+
     def update_event_embeddings(
         self,
         event_id: str,
@@ -295,6 +328,7 @@ class EventStore:
             "image_url": f"/media/{image_path.name}",
             "detections": json.loads(row["detections_json"]),
             "embeddings": embedding_metadata(row),
+            "processing_status": event_processing_status(row),
         }
         if score is not None:
             payload["score"] = score
@@ -347,6 +381,20 @@ def embedding_metadata(row: sqlite3.Row) -> dict[str, Any]:
         "image": embedding_summary(image_vector),
         "video": embedding_summary(video_vector),
     }
+
+
+def event_processing_status(row: sqlite3.Row) -> dict[str, bool]:
+    return {
+        "image_embedding": stored_vector_present(row["image_embedding_json"] or row["embedding_json"]),
+        "video_embedding": stored_vector_present(row["video_embedding_json"]),
+        "vlm_description": bool(row["description"].strip()),
+    }
+
+
+def stored_vector_present(value: str | None) -> bool:
+    if not value:
+        return False
+    return bool(json.loads(value))
 
 
 def embedding_summary(vector: list[float]) -> dict[str, Any]:

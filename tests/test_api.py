@@ -128,9 +128,16 @@ def test_event_embeddings_endpoint(tmp_path: Path) -> None:
         )
         app.state.pipeline.store.add_event(event)
 
+        events_response = client.get("/api/events?limit=1")
         response = client.get(f"/api/events/{event.id}/embeddings")
         values_response = client.get(f"/api/events/{event.id}/embeddings?include_values=true")
 
+        assert events_response.status_code == 200
+        assert events_response.json()["events"][0]["processing_status"] == {
+            "image_embedding": True,
+            "video_embedding": True,
+            "vlm_description": True,
+        }
         assert response.status_code == 200
         assert response.json()["image"]["dimensions"] == 2
         assert "vectors" not in response.json()

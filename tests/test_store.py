@@ -25,6 +25,55 @@ def test_store_round_trips_events(tmp_path: Path) -> None:
     assert events[0]["detections"][0]["label"] == "person"
     assert events[0]["embeddings"]["image"]["dimensions"] == 3
     assert events[0]["embeddings"]["video"]["dimensions"] == 3
+    assert events[0]["processing_status"] == {
+        "image_embedding": True,
+        "video_embedding": True,
+        "vlm_description": True,
+    }
+
+
+def test_store_reports_processing_status_for_incomplete_events(tmp_path: Path) -> None:
+    store = EventStore(tmp_path / "events.db")
+    event = VisualEvent.create(
+        camera_id="test-camera",
+        label_summary="person",
+        confidence=0.92,
+        description="",
+        image_path=tmp_path / "frame.jpg",
+        detections=[Detection("person", 0.92, (1.0, 2.0, 3.0, 4.0))],
+        image_embedding=[1.0, 0.0, 0.0],
+        video_embedding=[],
+    )
+
+    store.add_event(event)
+
+    stored_event = store.get_event(event.id)
+    assert stored_event is not None
+    assert stored_event["processing_status"] == {
+        "image_embedding": True,
+        "video_embedding": False,
+        "vlm_description": False,
+    }
+
+
+def test_store_updates_event_description(tmp_path: Path) -> None:
+    store = EventStore(tmp_path / "events.db")
+    event = VisualEvent.create(
+        camera_id="test-camera",
+        label_summary="person",
+        confidence=0.92,
+        description="Detected person in the camera view.",
+        image_path=tmp_path / "frame.jpg",
+        detections=[Detection("person", 0.92, (1.0, 2.0, 3.0, 4.0))],
+        embedding=[1.0, 0.0, 0.0],
+    )
+    store.add_event(event)
+
+    store.update_event_description(event.id, "A person is visible near the camera.")
+
+    updated = store.get_event(event.id)
+    assert updated is not None
+    assert updated["description"] == "A person is visible near the camera."
 
 
 def test_vector_search_orders_by_cosine_similarity(tmp_path: Path) -> None:

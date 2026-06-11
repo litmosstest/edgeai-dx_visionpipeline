@@ -7,11 +7,17 @@ const cameraId = document.querySelector("#cameraId");
 const rtspUrl = document.querySelector("#rtspUrl");
 const queryInput = document.querySelector("#queryInput");
 const embeddingType = document.querySelector("#embeddingType");
+const searchButton = document.querySelector("#searchButton");
 const deleteRange = document.querySelector("#deleteRange");
 const sampleImage = document.querySelector("#sampleImage");
 const sampleOverlay = document.querySelector("#sampleOverlay");
 const sampleMeta = document.querySelector("#sampleMeta");
 const svgNamespace = "http://www.w3.org/2000/svg";
+const completionItems = [
+  ["image_embedding", "Image"],
+  ["video_embedding", "Video"],
+  ["vlm_description", "VLM"],
+];
 let activeSearch = false;
 
 document.querySelector("#startButton").addEventListener("click", async () => {
@@ -24,7 +30,7 @@ document.querySelector("#stopButton").addEventListener("click", async () => {
   await refresh();
 });
 
-document.querySelector("#searchButton").addEventListener("click", search);
+searchButton.addEventListener("click", search);
 document.querySelector("#clearButton").addEventListener("click", async () => {
   queryInput.value = "";
   activeSearch = false;
@@ -58,13 +64,33 @@ async function search() {
     return;
   }
   activeSearch = true;
-  const response = await fetch("/api/search", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, limit: 40, embedding_type: embeddingType.value }),
-  });
-  const payload = await response.json();
-  renderEvents(payload.events, true, searchMessage(payload));
+  setSearchLoading(true);
+  renderEvents([], false, `Searching for "${query}"...`);
+  try {
+    const response = await fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query, limit: 40, embedding_type: embeddingType.value }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `Search failed with HTTP ${response.status}.`);
+    }
+    if (!Array.isArray(payload.events)) {
+      throw new Error("Search response did not include an events list.");
+    }
+    renderEvents(payload.events, true, searchMessage(payload, query));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Search failed.";
+    renderEvents([], false, message);
+  } finally {
+    setSearchLoading(false);
+  }
+}
+
+function setSearchLoading(isLoading) {
+  searchButton.disabled = isLoading;
+  searchButton.textContent = isLoading ? "Searching" : "Search";
 }
 
 async function deleteEventRange() {
@@ -135,11 +161,19 @@ function renderSample(pipeline) {
 
 function renderEvents(events, showScore = false, emptyMessage = "No events captured yet.") {
   eventsEl.replaceChildren();
+  if (activeSearch) {
+    const notice = document.createElement("div");
+    notice.className = "search-notice";
+    notice.textContent = emptyMessage;
+    eventsEl.append(notice);
+  }
   if (!events.length) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = emptyMessage;
-    eventsEl.append(empty);
+    if (!activeSearch) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = emptyMessage;
+      eventsEl.append(empty);
+    }
     return;
   }
 
@@ -156,6 +190,7 @@ function renderEvents(events, showScore = false, emptyMessage = "No events captu
     node.querySelector(".delete-event-button").addEventListener("click", async () => {
       await deleteEvent(event.id);
     });
+    renderCompletionStatus(node.querySelector(".completion-status"), event.processing_status || {});
     node.querySelector(".description").textContent = event.description;
     const timestamp = new Date(event.timestamp).toLocaleString();
     node.querySelector(".meta").textContent = showScore && typeof event.score === "number"
@@ -179,6 +214,19 @@ function renderEvents(events, showScore = false, emptyMessage = "No events captu
       chips.append(chip);
     }
     eventsEl.append(node);
+  }
+}
+
+function renderCompletionStatus(container, status) {
+  container.replaceChildren();
+  for (const [key, label] of completionItems) {
+    const complete = Boolean(status[key]);
+    const item = document.createElement("span");
+    item.className = `status-tick ${complete ? "is-complete" : "is-pending"}`;
+    item.textContent = `${complete ? "✓ " : ""}${label}`;
+    item.title = `${label}: ${complete ? "created" : "pending"}`;
+    item.setAttribute("aria-label", item.title);
+    container.append(item);
   }
 }
 
@@ -222,11 +270,17 @@ function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
 
-function searchMessage(payload) {
-  if (!payload.skipped_vectors) {
-    return "No matching events found.";
+function searchMessage(payload, query) {
+  const count = payload.events?.length ?? 0;
+  if (count > 0) {
+    return count === 1
+      ? `Showing 1 result for "${query}".`
+      : `Showing ${count} results for "${query}".`;
   }
-  return `No compatible ${payload.query_dimensions}d embeddings found. Re-embed older events with the current model.`;
+  if (payload.skipped_vectors) {
+    return `No compatible ${payload.query_dimensions}d embeddings found. Re-embed older events with the current model.`;
+  }
+  return `No matching events found for "${query}".`;
 }
 
 refresh();
