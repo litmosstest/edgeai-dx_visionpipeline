@@ -140,20 +140,3 @@ VISION_VLM_BACKEND=template
 VISION_PUBLISHER=test
 ```
 
-## What Gets Stored
-
-Each event can store:
-
-- camera id and timestamp
-- detected labels and confidence
-- bounding boxes
-- saved event image
-- image embedding vector
-- video embedding vector
-- optional VLM text description
-
-The dashboard can show the latest frame, list events, draw boxes, and search stored events using text embeddings.
-
-## Why This Exists
-
-I wanted a simple end-to-end edge vision demo that shows the full loop, not just a single model notebook. The useful bit is seeing the practical plumbing together: camera input, RTSP, model inference, embeddings, local event memory, and a small UI for reviewing what happened.
