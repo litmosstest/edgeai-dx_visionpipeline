@@ -78,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "ok": True,
             "events": state.store.count_events(),
             "pipeline": state.controller.status().__dict__,
+            "runtime": runtime_summary(state.settings),
         }
 
     @app.get("/api/events")
@@ -155,6 +156,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
 def get_state(app: FastAPI) -> PipelineAppState:
     return app.state.pipeline
+
+
+def runtime_summary(settings: Settings) -> dict[str, Any]:
+    sample_interval_seconds = settings.sample_every_n_frames / max(settings.capture_fps, 1)
+    return {
+        "detector_backend": settings.detector_backend,
+        "detector_model": settings.detector_model,
+        "capture_fps": settings.capture_fps,
+        "sample_every_n_frames": settings.sample_every_n_frames,
+        "sample_interval_seconds": sample_interval_seconds,
+        "min_confidence": settings.min_confidence,
+        "target_labels": [
+            label.strip()
+            for label in settings.target_labels.split(",")
+            if label.strip()
+        ],
+        "event_cooldown_seconds": settings.event_cooldown_seconds,
+        "vlm_backend": settings.vlm_backend,
+        "vlm_model": settings.vlm_model,
+    }
 
 
 def search_query_vectors(

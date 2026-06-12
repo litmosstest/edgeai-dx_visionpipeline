@@ -36,6 +36,8 @@ def test_describe_events_updates_saved_descriptions(tmp_path: Path, monkeypatch)
     updated = store.get_event(event.id)
     assert updated is not None
     assert updated["description"] == "Camera frame 32x24: detected person; highest detector confidence 90%."
+    assert updated["description_backend"] == "template"
+    assert updated["processing_status"]["vlm_description"] is False
 
 
 def test_reembed_events_preserves_saved_video_embedding(tmp_path: Path, monkeypatch) -> None:

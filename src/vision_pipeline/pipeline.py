@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 import time
 from collections import deque
@@ -105,24 +106,30 @@ class VisionPipeline:
         except ImportError as error:
             raise RuntimeError("OpenCV is not installed. Run: pip install -e '.[models]'") from error
 
-        capture = cv2.VideoCapture(self.settings.rtsp_url)
-        if not capture.isOpened():
-            raise RuntimeError(
-                f"Could not open RTSP stream: {self.settings.rtsp_url}. "
-                "Make sure MediaMTX is running and FFmpeg is actively publishing the webcam "
-                "to that exact RTSP path. Run: docker compose up -d mediamtx && "
-                "./scripts/publish_webcam_rtsp.sh, then verify with ./scripts/check_rtsp.sh."
-            )
+        capture = self._open_rtsp_capture(cv2)
 
         frame_interval = 1.0 / max(self.settings.capture_fps, 1)
+        read_failures = 0
         while not self._stop.is_set():
             started_at = time.monotonic()
             ok, frame_bgr = capture.read()
             if not ok:
-                self.last_error = "Failed to read frame from RTSP stream"
+                read_failures += 1
+                if read_failures >= 5:
+                    self.last_error = "Failed to read frame from RTSP stream"
+                if read_failures >= 10:
+                    LOGGER.warning(
+                        "Failed to read %s consecutive RTSP frames; reconnecting to %s",
+                        read_failures,
+                        self.settings.rtsp_url,
+                    )
+                    capture.release()
+                    capture = self._reopen_rtsp_capture(cv2)
+                    read_failures = 0
                 time.sleep(0.5)
                 continue
 
+            read_failures = 0
             self.last_error = None
             self.frames_seen += 1
             if self.frames_seen % self.settings.sample_every_n_frames == 0:
@@ -132,6 +139,46 @@ class VisionPipeline:
             if elapsed < frame_interval:
                 time.sleep(frame_interval - elapsed)
         capture.release()
+
+    def _open_rtsp_capture(self, cv2) -> object:
+        capture = self._new_rtsp_capture(cv2)
+        if capture.isOpened():
+            return capture
+        capture.release()
+        raise RuntimeError(
+            f"Could not open RTSP stream: {self.settings.rtsp_url}. "
+            "Make sure MediaMTX is running and FFmpeg is actively publishing the webcam "
+            "to that exact RTSP path. Run: docker compose up -d mediamtx && "
+            "./scripts/publish_webcam_rtsp.sh, then verify with ./scripts/check_rtsp.sh."
+        )
+
+    def _reopen_rtsp_capture(self, cv2) -> object:
+        while not self._stop.is_set():
+            capture = self._new_rtsp_capture(cv2)
+            if capture.isOpened():
+                LOGGER.info("Reconnected to RTSP stream: %s", self.settings.rtsp_url)
+                self.last_error = None
+                return capture
+            capture.release()
+            self.last_error = "Failed to reconnect to RTSP stream"
+            time.sleep(1.0)
+        return self._new_rtsp_capture(cv2)
+
+    def _new_rtsp_capture(self, cv2) -> object:
+        open_timeout = getattr(cv2, "CAP_PROP_OPEN_TIMEOUT_MSEC", None)
+        read_timeout = getattr(cv2, "CAP_PROP_READ_TIMEOUT_MSEC", None)
+        api_preference = getattr(cv2, "CAP_FFMPEG", 0)
+        parameters: list[int] = []
+        if open_timeout is not None:
+            parameters.extend([open_timeout, 5000])
+        if read_timeout is not None:
+            parameters.extend([read_timeout, 3000])
+        if parameters:
+            try:
+                return cv2.VideoCapture(self.settings.rtsp_url, api_preference, parameters)
+            except TypeError:
+                pass
+        return cv2.VideoCapture(self.settings.rtsp_url)
 
     def _process_frame(self, frame_bgr: np.ndarray) -> None:
         detections = self.detector.detect(frame_bgr)
@@ -160,6 +207,7 @@ class VisionPipeline:
             label_summary=label_summary,
             confidence=confidence,
             description=description,
+            description_backend=self.settings.vlm_backend,
             image_path=image_path,
             detections=detections,
             image_embedding=image_embedding,
@@ -267,9 +315,20 @@ def bgr_to_image(frame_bgr: np.ndarray) -> Image.Image:
 
 def save_image_atomic(image: Image.Image, destination: Path, quality: int) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    temporary_path = destination.with_name(f".{destination.stem}.tmp{destination.suffix}")
-    image.save(temporary_path, quality=quality)
-    temporary_path.replace(destination)
+    temporary_file = tempfile.NamedTemporaryFile(
+        delete=False,
+        dir=destination.parent,
+        prefix=f".{destination.stem}.",
+        suffix=f".tmp{destination.suffix}",
+    )
+    temporary_path = Path(temporary_file.name)
+    temporary_file.close()
+    try:
+        image.save(temporary_path, quality=quality)
+        temporary_path.replace(destination)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
 
 
 def filter_target_labels(detections: Sequence[Detection], target_labels: str) -> list[Detection]:

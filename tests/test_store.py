@@ -12,6 +12,7 @@ def test_store_round_trips_events(tmp_path: Path) -> None:
         label_summary="person",
         confidence=0.92,
         description="Detected a person near the camera.",
+        description_backend="transformers",
         image_path=tmp_path / "frame.jpg",
         detections=[Detection("person", 0.92, (1.0, 2.0, 3.0, 4.0))],
         embedding=[1.0, 0.0, 0.0],
@@ -30,6 +31,27 @@ def test_store_round_trips_events(tmp_path: Path) -> None:
         "video_embedding": True,
         "vlm_description": True,
     }
+    assert events[0]["description_backend"] == "transformers"
+
+
+def test_store_does_not_count_template_description_as_vlm(tmp_path: Path) -> None:
+    store = EventStore(tmp_path / "events.db")
+    event = VisualEvent.create(
+        camera_id="test-camera",
+        label_summary="person",
+        confidence=0.92,
+        description="Camera frame 1280x720: detected person.",
+        description_backend="template",
+        image_path=tmp_path / "frame.jpg",
+        detections=[Detection("person", 0.92, (1.0, 2.0, 3.0, 4.0))],
+        embedding=[1.0, 0.0, 0.0],
+    )
+
+    store.add_event(event)
+
+    stored_event = store.get_event(event.id)
+    assert stored_event is not None
+    assert stored_event["processing_status"]["vlm_description"] is False
 
 
 def test_store_reports_processing_status_for_incomplete_events(tmp_path: Path) -> None:
@@ -69,11 +91,17 @@ def test_store_updates_event_description(tmp_path: Path) -> None:
     )
     store.add_event(event)
 
-    store.update_event_description(event.id, "A person is visible near the camera.")
+    store.update_event_description(
+        event.id,
+        "A person is visible near the camera.",
+        "transformers",
+    )
 
     updated = store.get_event(event.id)
     assert updated is not None
     assert updated["description"] == "A person is visible near the camera."
+    assert updated["description_backend"] == "transformers"
+    assert updated["processing_status"]["vlm_description"] is True
 
 
 def test_vector_search_orders_by_cosine_similarity(tmp_path: Path) -> None:

@@ -33,6 +33,7 @@ class VisualEvent:
     label_summary: str
     confidence: float
     description: str
+    description_backend: str
     image_path: Path
     detections: list[Detection]
     image_embedding: list[float]
@@ -51,6 +52,7 @@ class VisualEvent:
         description: str,
         image_path: Path,
         detections: list[Detection],
+        description_backend: str = "unknown",
         embedding: list[float] | None = None,
         image_embedding: list[float] | None = None,
         video_embedding: list[float] | None = None,
@@ -66,6 +68,7 @@ class VisualEvent:
             label_summary=label_summary,
             confidence=confidence,
             description=description,
+            description_backend=description_backend,
             image_path=image_path,
             detections=detections,
             image_embedding=resolved_image_embedding,

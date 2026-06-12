@@ -132,8 +132,17 @@ async function deleteEvent(eventId) {
 
 function renderStatus(health) {
   const pipeline = health.pipeline;
+  const runtime = health.runtime || {};
+  const sampleSeconds = Number(runtime.sample_interval_seconds || 0);
+  const samplingText = sampleSeconds > 0
+    ? `detects every ${formatSeconds(sampleSeconds)}`
+    : "detection cadence unknown";
+  const labels = Array.isArray(runtime.target_labels) && runtime.target_labels.length
+    ? runtime.target_labels.join(", ")
+    : "all labels";
+  const backend = runtime.vlm_backend || "unknown";
   statusLine.textContent = pipeline.running
-    ? `Running on ${pipeline.rtsp_url}`
+    ? `Running on ${pipeline.rtsp_url} · ${samplingText} · ${labels} · descriptions: ${backend}`
     : pipeline.last_error || "Stopped";
   eventCount.textContent = String(health.events);
   frameCount.textContent = String(pipeline.frames_seen);
@@ -228,6 +237,12 @@ function renderCompletionStatus(container, status) {
     item.setAttribute("aria-label", item.title);
     container.append(item);
   }
+}
+
+function formatSeconds(seconds) {
+  return seconds >= 1
+    ? `${seconds.toFixed(seconds % 1 === 0 ? 0 : 1)}s`
+    : `${Math.round(seconds * 1000)}ms`;
 }
 
 function drawBoxes(svg, detections, width, height) {

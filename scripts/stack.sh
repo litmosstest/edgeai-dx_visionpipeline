@@ -32,7 +32,41 @@ publisher_script() {
 }
 
 publisher_url() {
-  printf '%s\n' "${RTSP_URL:-${VISION_RTSP_URL:-rtsp://localhost:8554/webcam}}"
+  local rtsp_url
+  rtsp_url="${RTSP_URL:-$(env_value VISION_RTSP_URL rtsp://localhost:8554/webcam)}"
+  printf '%s\n' "$rtsp_url"
+}
+
+env_value() {
+  local name="$1"
+  local default_value="$2"
+  local value="${!name-}"
+  if [[ -n "$value" ]]; then
+    printf '%s\n' "$value"
+    return
+  fi
+
+  if [[ -f "$ROOT_DIR/.env" ]]; then
+    value="$(awk -F= -v key="$name" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$ROOT_DIR/.env")"
+    if [[ -n "$value" ]]; then
+      printf '%s\n' "$value"
+      return
+    fi
+  fi
+
+  printf '%s\n' "$default_value"
+}
+
+api_url() {
+  local configured_url port
+  configured_url="$(env_value VISION_API_URL "")"
+  if [[ -n "$configured_url" ]]; then
+    printf '%s\n' "$configured_url"
+    return
+  fi
+
+  port="$(env_value VISION_PORT 8081)"
+  printf 'http://127.0.0.1:%s\n' "$port"
 }
 
 find_publisher_pids() {
@@ -108,6 +142,24 @@ start_publisher() {
   echo "Started FFmpeg publisher with PID $(cat "$PUBLISHER_PID"). Log: $LOG_DIR/publisher.log"
 }
 
+wait_for_publisher() {
+  if ! [[ -f "$PUBLISHER_PID" ]]; then
+    return 0
+  fi
+
+  for _ in {1..20}; do
+    if is_running "$PUBLISHER_PID"; then
+      sleep 0.25
+      continue
+    fi
+
+    rm -f "$PUBLISHER_PID"
+    echo "FFmpeg publisher exited during startup. Recent publisher log:" >&2
+    tail -n 40 "$LOG_DIR/publisher.log" >&2 || true
+    return 1
+  done
+}
+
 start_api() {
   if is_running "$API_PID"; then
     echo "API is already running with PID $(cat "$API_PID")."
@@ -124,10 +176,63 @@ start_api() {
   echo "Started API with PID $(cat "$API_PID"). Log: $LOG_DIR/api.log"
 }
 
+wait_for_api() {
+  local url
+  url="$(api_url)"
+  for _ in {1..60}; do
+    if curl -fsS "$url/api/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "API did not become healthy at $url. Check $LOG_DIR/api.log" >&2
+  return 1
+}
+
+wait_for_rtsp() {
+  local rtsp_url
+  rtsp_url="$(publisher_url)"
+  if ! command -v ffprobe >/dev/null 2>&1; then
+    echo "ffprobe is not installed; skipping RTSP readiness check for $rtsp_url."
+    return 0
+  fi
+
+  for _ in {1..30}; do
+    if ffprobe -v error -rtsp_transport tcp -select_streams v:0 \
+      -show_entries stream=codec_name -of csv=p=0 "$rtsp_url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.5
+  done
+
+  echo "RTSP stream did not become readable at $rtsp_url. Recent publisher log:" >&2
+  tail -n 40 "$LOG_DIR/publisher.log" >&2 || true
+  return 1
+}
+
+start_pipeline() {
+  case "${VISION_STACK_START_PIPELINE:-1}" in
+    0|false|no)
+      echo "Pipeline auto-start skipped because VISION_STACK_START_PIPELINE=${VISION_STACK_START_PIPELINE}."
+      return
+      ;;
+  esac
+
+  local url
+  url="$(api_url)"
+  wait_for_api
+  wait_for_rtsp
+  nohup curl -fsS -X POST "$url/api/pipeline/start" >"$LOG_DIR/pipeline-start.log" 2>&1 &
+  echo "Pipeline start requested. Log: $LOG_DIR/pipeline-start.log"
+}
+
 start_all() {
   start_mediamtx
   start_publisher
+  wait_for_publisher
   start_api
+  start_pipeline
   echo "Stack start requested. Open the dashboard on VISION_PORT, default http://localhost:8081."
 }
 

@@ -34,6 +34,7 @@ class EventStore:
                     label_summary TEXT NOT NULL,
                     confidence REAL NOT NULL,
                     description TEXT NOT NULL,
+                    description_backend TEXT NOT NULL DEFAULT 'unknown',
                     image_path TEXT NOT NULL,
                     detections_json TEXT NOT NULL,
                     embedding_json TEXT NOT NULL,
@@ -50,6 +51,10 @@ class EventStore:
                 connection.execute("ALTER TABLE events ADD COLUMN image_embedding_json TEXT")
             if "video_embedding_json" not in columns:
                 connection.execute("ALTER TABLE events ADD COLUMN video_embedding_json TEXT")
+            if "description_backend" not in columns:
+                connection.execute(
+                    "ALTER TABLE events ADD COLUMN description_backend TEXT NOT NULL DEFAULT 'unknown'"
+                )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp DESC)"
             )
@@ -60,9 +65,9 @@ class EventStore:
                 """
                 INSERT INTO events (
                     id, camera_id, timestamp, label_summary, confidence, description,
-                    image_path, detections_json, embedding_json, image_embedding_json,
-                    video_embedding_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    description_backend, image_path, detections_json, embedding_json,
+                    image_embedding_json, video_embedding_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.id,
@@ -71,6 +76,7 @@ class EventStore:
                     event.label_summary,
                     event.confidence,
                     event.description,
+                    event.description_backend,
                     str(event.image_path),
                     json.dumps([detection.as_dict() for detection in event.detections]),
                     json.dumps(event.embedding),
@@ -84,8 +90,8 @@ class EventStore:
             rows = connection.execute(
                 """
                 SELECT id, camera_id, timestamp, label_summary, confidence, description,
-                      image_path, detections_json, embedding_json, image_embedding_json,
-                      video_embedding_json
+                        description_backend, image_path, detections_json, embedding_json,
+                        image_embedding_json, video_embedding_json
                 FROM events
                 ORDER BY timestamp DESC
                 LIMIT ? OFFSET ?
@@ -99,8 +105,8 @@ class EventStore:
             row = connection.execute(
                 """
                 SELECT id, camera_id, timestamp, label_summary, confidence, description,
-                      image_path, detections_json, embedding_json, image_embedding_json,
-                      video_embedding_json
+                        description_backend, image_path, detections_json, embedding_json,
+                        image_embedding_json, video_embedding_json
                 FROM events
                 WHERE id = ?
                 """,
@@ -272,7 +278,7 @@ class EventStore:
 
     def list_event_description_inputs(self, limit: int | None = None) -> list[dict[str, Any]]:
         query = """
-            SELECT id, description, image_path, detections_json
+            SELECT id, description, description_backend, image_path, detections_json
             FROM events
             ORDER BY timestamp DESC
         """
@@ -286,21 +292,27 @@ class EventStore:
             {
                 "id": row["id"],
                 "description": row["description"],
+                "description_backend": row["description_backend"],
                 "image_path": Path(row["image_path"]),
                 "detections": detections_from_json(row["detections_json"]),
             }
             for row in rows
         ]
 
-    def update_event_description(self, event_id: str, description: str) -> None:
+    def update_event_description(
+        self,
+        event_id: str,
+        description: str,
+        description_backend: str = "unknown",
+    ) -> None:
         with self.connect() as connection:
             connection.execute(
                 """
                 UPDATE events
-                SET description = ?
+                SET description = ?, description_backend = ?
                 WHERE id = ?
                 """,
-                (description, event_id),
+                (description, description_backend, event_id),
             )
 
     def update_event_embeddings(
@@ -359,6 +371,7 @@ class EventStore:
             "label_summary": row["label_summary"],
             "confidence": row["confidence"],
             "description": row["description"],
+            "description_backend": row["description_backend"],
             "image_path": str(image_path),
             "image_url": f"/media/{image_path.name}",
             "detections": json.loads(row["detections_json"]),
@@ -454,8 +467,13 @@ def event_processing_status(row: sqlite3.Row) -> dict[str, bool]:
     return {
         "image_embedding": stored_vector_present(row["image_embedding_json"] or row["embedding_json"]),
         "video_embedding": stored_vector_present(row["video_embedding_json"]),
-        "vlm_description": bool(row["description"].strip()),
+        "vlm_description": bool(row["description"].strip())
+        and is_vlm_description_backend(row["description_backend"]),
     }
+
+
+def is_vlm_description_backend(backend: str | None) -> bool:
+    return (backend or "").lower() in {"transformers", "qwen", "qwen-vl"}
 
 
 def stored_vector_present(value: str | None) -> bool:

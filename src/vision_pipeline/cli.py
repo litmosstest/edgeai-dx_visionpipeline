@@ -125,7 +125,7 @@ def describe_events(
             continue
         with Image.open(image_path) as image:
             description = describer.describe(image.convert("RGB"), row["detections"])
-        store.update_event_description(row["id"], description)
+        store.update_event_description(row["id"], description, settings.vlm_backend)
         updated += 1
         print(f"Described {updated}/{len(rows)} events", end="\r", flush=True)
     print(f"Described {updated} events; skipped {missing} missing images.")

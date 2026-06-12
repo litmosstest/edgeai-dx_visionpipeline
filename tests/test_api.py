@@ -49,6 +49,30 @@ def test_search_reuses_cached_embedder(tmp_path: Path) -> None:
         assert state._search_embedder is first_embedder
 
 
+def test_health_includes_runtime_summary(tmp_path: Path) -> None:
+    settings = Settings(
+        database_path=tmp_path / "events.db",
+        media_dir=tmp_path / "media",
+        embedding_backend="hash",
+        embedding_model="unused",
+        capture_fps=8,
+        sample_every_n_frames=4,
+        target_labels="person, car",
+        vlm_backend="template",
+        device="cpu",
+    )
+    app = create_app(settings)
+
+    with TestClient(app) as client:
+        response = client.get("/api/health")
+
+        assert response.status_code == 200
+        runtime = response.json()["runtime"]
+        assert runtime["sample_interval_seconds"] == 0.5
+        assert runtime["target_labels"] == ["person", "car"]
+        assert runtime["vlm_backend"] == "template"
+
+
 def test_search_reports_incompatible_embeddings(tmp_path: Path) -> None:
     settings = Settings(
         database_path=tmp_path / "events.db",
@@ -65,6 +89,7 @@ def test_search_reports_incompatible_embeddings(tmp_path: Path) -> None:
             label_summary="person",
             confidence=0.9,
             description="Person detected.",
+            description_backend="transformers",
             image_path=tmp_path / "event.jpg",
             detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
             embedding=[1.0, 0.0],
@@ -147,6 +172,7 @@ def test_delete_event_endpoint(tmp_path: Path) -> None:
             label_summary="person",
             confidence=0.9,
             description="Person detected.",
+            description_backend="transformers",
             image_path=tmp_path / "event.jpg",
             detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
             embedding=[1.0, 0.0],
@@ -192,6 +218,7 @@ def test_event_embeddings_endpoint(tmp_path: Path) -> None:
             label_summary="person",
             confidence=0.9,
             description="Person detected.",
+            description_backend="transformers",
             image_path=tmp_path / "event.jpg",
             detections=[Detection("person", 0.9, (0.0, 0.0, 1.0, 1.0))],
             image_embedding=[1.0, 0.0],
